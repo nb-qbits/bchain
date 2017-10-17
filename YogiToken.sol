@@ -17,7 +17,7 @@ library SafeMath {
     function sub(uint256 a, uint256 b) internal constant returns (uint256) {
         assert(b <= a);
         return a - b;
-    }
+    } 
 
     function add(uint256 a, uint256 b) internal constant returns (uint256) {
         uint256 c = a + b;
@@ -58,8 +58,10 @@ contract YogiToken is IERC20 {
 
     uint public softCap = 15 ether;
 
+    bool public isGoalReached = false;
+
     //total sold token
-    uint public tokensSold = 0;
+    uint public totaldistribution = 0;
 
     // Balances for each account
     mapping (address => uint256) balances;
@@ -100,6 +102,8 @@ contract YogiToken is IERC20 {
     // How much wei we have given back to investors.
     uint public weiRefunded = 0;
 
+    bool public crowdsale = true;
+
     event TokenPurchase(address indexed purchaser, address indexed beneficiary, uint256 value, uint256 amount);
 
     event BurnToken(uint256 value);
@@ -107,10 +111,19 @@ contract YogiToken is IERC20 {
     // Refund was processed for a contributor
     event Refund(address investor, uint weiAmount);
 
+    event ResumeCrowdsale();
+    event PausedCrowdsale();
+
+    event MinimumGoalReached();
 
     // modifier to allow only owner has full control on the function
     modifier onlyOwner {
         require(msg.sender == owner);
+        _;
+    }
+
+    modifier isCrowdsale() {
+        require(crowdsale);
         _;
     }
 
@@ -126,21 +139,19 @@ contract YogiToken is IERC20 {
         balances[multisig] = _totalSupply;
         stage = Stage.PREICO;
         owner=msg.sender;
-        //investorCount = 0;
-        //indexes[investorCount] = multisig;
     }
 
 
     // Payable method
     // @notice Anyone can buy the tokens on tokensale by paying ether
-    function () public payable {
+    function () public payable isCrowdsale {
         tokensale(msg.sender);
     }
 
     // @notice tokensale
     // @param recipient The address of the recipient
     // @return the transaction address and send the event as Transfer
-    function tokensale(address _to) public payable {
+    function tokensale(address _to) public payable isCrowdsale {
         require(_to != 0x0);
         require(validPurchase());
 
@@ -164,7 +175,7 @@ contract YogiToken is IERC20 {
 
         // Update totals
         fundRaised = fundRaised.add(weiAmount);
-        tokensSold = tokensSold.add(tokens);
+        totaldistribution = totaldistribution.add(tokens);
 
         balances[multisig] = balances[multisig].sub(tokens);
         _icoSupply = _icoSupply.sub(tokens);
@@ -172,6 +183,11 @@ contract YogiToken is IERC20 {
         TokenPurchase(msg.sender, _to, weiAmount, tokens);
 
         forwardFunds();
+
+        if (!isGoalReached && fundRaised >= softCap) {
+            isGoalReached = true;
+            MinimumGoalReached();
+        }
     }
 
     // send ether to the fund collection wallet
@@ -200,7 +216,6 @@ contract YogiToken is IERC20 {
         return fundRaised >= softCap;
     }
 
-    // Update the ICO completion stage as Success or Failure based on the fund raised
     function updateICOStatus() public onlyOwner {
         if (hasEnded() && fundRaised >= softCap) {
             stage = Stage.SUCCESS;
@@ -261,6 +276,15 @@ contract YogiToken is IERC20 {
     function changeEndTime(uint256 _endTime) public onlyOwner {
         require(startTime > getNow());
     	endTime = _endTime;
+    }
+
+    // Halt or Resume Crowd Sale / ICO
+    function pauseResumeCrowdsale(bool _crowdsale) public onlyOwner {
+        crowdsale = _crowdsale;
+        if (crowdsale)
+            ResumeCrowdsale();
+        else
+           PausedCrowdsale();
     }
 
     function burnToken() public onlyOwner {
